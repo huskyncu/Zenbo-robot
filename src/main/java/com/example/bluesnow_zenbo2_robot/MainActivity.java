@@ -8,6 +8,18 @@ import com.asus.robotframework.API.RobotCmdState;
 import com.asus.robotframework.API.RobotCommand;
 import com.asus.robotframework.API.RobotErrorCode;
 import com.asus.robotframework.API.RobotFace;
+import android.app.Activity;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.os.Bundle;
+import android.widget.TextView;
+
+import com.asus.robotframework.API.RobotAPI;
+import com.asus.robotframework.API.RobotCallback;
+import com.asus.robotframework.API.RobotFace;
+import com.asus.robotframework.API.Utility;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -22,17 +34,20 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.URL;
 import java.util.Enumeration;
 
-
 public class MainActivity extends RobotActivity {
-    public MainActivity(RobotCallback robotCallback, RobotCallback.Listen robotListenCallback){
+    public static final int TYPE_CAPACITY_TOUCH = Utility.SensorType.CAPACITY_TOUCH;
+    public MainActivity(RobotCallback robotCallback, RobotCallback.Listen robotListenCallback) {
         super(robotCallback, robotListenCallback);
     }
 
@@ -40,17 +55,25 @@ public class MainActivity extends RobotActivity {
             "PLEASED", "HELPLESS", "SERIOUS", "WORRIED", "PRETENDING", "LAZY", "AWARE_RIGHT", "TIRED", "SHY", "INNOCENT",
             "SINGING", "AWARE_LEFT", "DEFAULT_STILL", "HIDEFACE"};
     private TextView ServerIP;
-    private TextView Status,action;
+    private TextView Status, action;
+
     ServerSocket serverSocket;
     BufferedReader reader;
     JSONObject object;
-    String tem_work="";
-    int pointer =0;
+    String tem_work = "";
+    int pointer = 0;
+    // sensor manager
+    private SensorManager mSensorManager;
+
+    // sensor
+    private Sensor mSensorCapacityTouch;
+    private TextView mTextView_capacity_touch_value0;
+    private TextView mTextView_capacity_touch_value1;
     String serverIP;
 
     {
         try {
-            serverSocket=new ServerSocket(7100);
+            serverSocket = new ServerSocket(7100);
             serverSocket.setReuseAddress(true);
         } catch (IOException e) {
             e.printStackTrace();
@@ -59,7 +82,7 @@ public class MainActivity extends RobotActivity {
 
     Runnable runnable = new Runnable() {
         @Override
-        public void run(){
+        public void run() {
             try {
                 /*new Thread(new GetWifiIP()).start();
                 while (serverIP ==null)
@@ -72,14 +95,15 @@ public class MainActivity extends RobotActivity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        try{
+                        try {
                             ServerIP.append(getLocalIpAddress());
-                        }
-                        catch (Exception e) {
+                        } catch (Exception e) {
                             e.printStackTrace();
                         }
                     }
                 });
+
+
                 new_work(serverSocket);
             } catch (Exception e) {
                 e.printStackTrace();
@@ -94,13 +118,53 @@ public class MainActivity extends RobotActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         initViewElement();
-        this.robotAPI = new RobotAPI(getApplicationContext(),robotCallback);
+        this.robotAPI = new RobotAPI(getApplicationContext(), robotCallback);
+        // ui
+        //CAPACITY_TOUCH
+        mTextView_capacity_touch_value0 = (TextView)findViewById(R.id.id_sensor_type_capacity_touch_value0_value);
+        mTextView_capacity_touch_value1 = (TextView)findViewById(R.id.id_sensor_type_capacity_touch_value1_value);
+
+        // sensor manager
+        mSensorManager = (SensorManager)getSystemService(SENSOR_SERVICE);
+
+        // sensors
+        mSensorCapacityTouch = mSensorManager.getDefaultSensor(TYPE_CAPACITY_TOUCH);
         thread.start();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mSensorManager.registerListener(listenerCapacityTouch, mSensorCapacityTouch, SensorManager.SENSOR_DELAY_UI);
+        if(robotListenCallback!= null)
+            robotAPI.robot.registerListenCallback(robotListenCallback);
+        View decorView = getWindow().getDecorView();
+        decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        );
+    }
+
+    //listener - TYPE_CAPACITY_TOUCH
+    SensorEventListener listenerCapacityTouch = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            mTextView_capacity_touch_value0.setText(String.valueOf(event.values[0]));
+            mTextView_capacity_touch_value1.setText(String.valueOf(event.values[1]));
+        }
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        }
+    };
     void new_work(ServerSocket serverSocket) {
-        try{
-            Socket socket= serverSocket.accept();
+        System.out.println("In the function");
+
+        try {
+            System.out.println("Server connected");
+            Socket socket = serverSocket.accept();
+            System.out.println("Server connected!!!");
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -111,72 +175,108 @@ public class MainActivity extends RobotActivity {
             Thread work = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    try{
-                        tem_work="";
-                        reader= new BufferedReader (new InputStreamReader(socket.getInputStream()));
+                    try {
+                        tem_work = "";
+                        reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                         //action.setText("22");
-                        while((tem_work=reader.readLine())!=null)
-                        {
-                            object= new JSONObject(tem_work);
-                            if(object.getString("act").equals("face")){
+                        while ((tem_work = reader.readLine()) != null) {
+                            object = new JSONObject(tem_work);
+                            if (object.getString("act").equals("face")) {
                                 setface();
-                                Log.d("Message",object.getString("act"));
+                                Log.d("Message", object.getString("act"));
 
-                            }
-                            else if(object.getString("act").equals("stop")){
+                            } else if (object.getString("act").equals("stop")) {
                                 stop();
-                                Log.d("Message",object.getString("act"));
+                                Log.d("Message", object.getString("act"));
 
-                            }
-                            else if(object.getString("act").equals("front")){
+                            } else if (object.getString("act").equals("front")) {
                                 front();
-                                Log.d("Message",object.getString("act"));
+                                Log.d("Message", object.getString("act"));
 
-                            }
-                            else if(object.getString("act").equals("back")){
+                            } else if (object.getString("act").equals("back")) {
                                 back();
-                                Log.d("Message",object.getString("act"));
+                                Log.d("Message", object.getString("act"));
 
-                            }
-                            else if(object.getString("act").equals("right")){
+                            } else if (object.getString("act").equals("right")) {
                                 right();
-                                Log.d("Message",object.getString("act"));
+                                Log.d("Message", object.getString("act"));
+
+                            } else if (object.getString("act").equals("left")) {
+                                left();
+                                Log.d("Message", object.getString("act"));
+
+                            } else if (object.getString("act").equals("lookatuser")) {
+                                lookatuser();
+                                Log.d("Message", object.getString("lookatuser"));
 
                             }
-                            else if(object.getString("act").equals("left")){
-                                left();
-                                Log.d("Message",object.getString("act"));
-
+                            else if(object.getString("act").equals("temp")){
+                                getData("temp");
                             }
 
                         }
-                    }
-                    catch (Exception e)
-                    {
+                    } catch (Exception e) {
                         e.printStackTrace();
                     }
                 }
             });
             work.start();
-        }
-        catch (Exception e)
-        {
+        } catch (Exception e) {
+            System.out.println("Server disconnected");
             e.printStackTrace();
         }
 
 
     }
-    void stop(){
+    void getData(final String param){
+        HttpURLConnection connection;
+        try {
+            URL url = new URL("http://140.115.158.250:3000/api/devices/SJdxWm4ui/data" +
+                    "channels/DHTchannelID/datapoints?limit=1");
+            connection = (HttpURLConnection)url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("deviceKey", "7751782cb87de3ce22285cb5689a6e53807537d70baf391165fb1dc644157a1d");
+            connection.setDoInput(true);
+
+            InputStream inputStream = connection.getInputStream();
+            BufferedReader bR = new BufferedReader(  new InputStreamReader(inputStream));
+            String line = "";
+
+            StringBuilder responseStrBuilder = new StringBuilder();
+            while((line =  bR.readLine()) != null){
+                responseStrBuilder.append(line);
+            }
+            inputStream.close();
+
+            JSONObject jsonPost = new JSONObject(responseStrBuilder.toString());
+
+            // men-set data ke dalam tampilan
+            JSONObject object = (JSONObject) jsonPost.getJSONArray("data").get(0);
+            String str = object.getJSONObject("values").getString("value");
+
+            if(param.contains("temp")){
+                robotAPI.robot.setExpression(RobotFace.HAPPY);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    void stop() {
         robotAPI.motion.remoteControlBody(MotionControl.Direction.Body.STOP);
         //robotAPI.motion.remoteControlHead(MotionControl.Direction.Head.STOP);
-        Log.d("work","stop");
+        Log.d("work", "stop");
     }
 
-    void left(){
+    void left() {
         robotAPI.motion.remoteControlBody(MotionControl.Direction.Body.TURN_LEFT);
-        Log.d("work","left");
+        Log.d("work", "left");
     }
 
+    void lookatuser()
+    {
+        robotAPI.utility.lookAtUser(0);
+        Log.d("work", "look");
+    }
     void right()
     {
         robotAPI.motion.remoteControlBody(MotionControl.Direction.Body.TURN_RIGHT);
